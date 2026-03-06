@@ -1,0 +1,44 @@
+# Dependencies
+node_modules
+bun.lock
+package-lock.json
+yarn.lock
+
+# Build outputs
+.next
+out
+build
+dist
+
+# Development files
+.git
+.gitignore
+.github
+.vscode
+.idea
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Docker files (prevent recursive copying)
+docker/Dockerfile*
+docker/docker-compose*.yml
+docker/.dockerignore
+
+# Test files
+tests
+**/*.test.ts
+**/*.spec.ts
+coverage
+
+# Documentation
+docs
+*.md
+!README.md
+
+# Misc
+.DS_Store
+*.log
+npm-debug.log*

@@ -1,0 +1,273 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge applications?
+// Try Prisma Accelerate! https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== User & Authentication ====================
+
+/// User entity - represents a system user
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String?
+  name         String?
+  role         String   @default("CUSTOMER") // ADMIN, MANAGER, CUSTOMER
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  customer Customer?
+
+  @@index([email])
+  @@map("users")
+}
+
+// ==================== Customer Aggregate ====================
+
+/// Customer entity - represents a customer in the system
+model Customer {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  email       String   @unique
+  firstName   String
+  lastName    String
+  phone       String?
+  isActive    Boolean  @default(true)
+  totalOrders Int      @default(0)
+  totalSpent  Float    @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  addresses Address[]
+  orders   Order[]
+
+  @@index([email])
+  @@index([firstName, lastName])
+  @@map("customers")
+}
+
+/// Customer address
+model Address {
+  id         String   @id @default(cuid())
+  customerId String
+  label      String
+  street     String
+  apartment  String?
+  city       String
+  state      String
+  zipCode    String
+  country    String
+  isDefault  Boolean  @default(false)
+  type       String   @default("both") // shipping, billing, both
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@map("addresses")
+}
+
+// ==================== Product Aggregate ====================
+
+/// Product entity - represents a product in the catalog
+model Product {
+  id          String   @id @default(cuid())
+  sku         String   @unique
+  name        String
+  description String
+  price       Float    // Stored as decimal amount
+  currency    String   @default("USD")
+  stock       Int      @default(0)
+  categoryId  String?
+  isActive    Boolean  @default(true)
+  attributes  String?  // JSON string for flexible attributes
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  images     ProductImage[]
+  orderItems OrderItem[]
+
+  @@index([sku])
+  @@index([isActive])
+  @@index([name])
+  @@index([categoryId])
+  @@map("products")
+}
+
+/// Product images
+model ProductImage {
+  id        String   @id @default(cuid())
+  productId String
+  url       String
+  alt       String?
+  isPrimary Boolean  @default(false)
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  // Relations
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@map("product_images")
+}
+
+/// Product category
+model Category {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  parentId    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("categories")
+}
+
+// ==================== Order Aggregate ====================
+
+/// Order entity - represents a customer order
+model Order {
+  id                 String   @id @default(cuid())
+  customerId         String
+  status             String   @default("pending")
+  totalAmount        Float
+  currency           String   @default("USD")
+  notes              String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  // Shipping Address (embedded)
+  shippingStreet     String
+  shippingApartment  String?
+  shippingCity       String
+  shippingState      String
+  shippingZipCode    String
+  shippingCountry    String
+  shippingInstructions String?
+
+  // Billing Address (embedded, optional)
+  billingStreet      String?
+  billingApartment   String?
+  billingCity        String?
+  billingState       String?
+  billingZipCode     String?
+  billingCountry     String?
+
+  // Relations
+  customer Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  items    OrderItem[]
+
+  @@index([customerId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+/// OrderItem entity - represents a line item in an order
+model OrderItem {
+  id          String   @id @default(cuid())
+  orderId     String
+  productId   String
+  productName String
+  productSku  String
+  unitPrice   Float
+  quantity    Int
+  discount    Float    @default(0)
+  currency    String   @default("USD")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+// ==================== Payment ====================
+
+/// Payment record
+model Payment {
+  id              String   @id @default(cuid())
+  orderId         String
+  customerId      String
+  amount          Float
+  currency        String   @default("USD")
+  status          String   @default("pending") // pending, succeeded, failed, refunded
+  paymentMethod   String?
+  transactionId   String?
+  failureReason   String?
+  processedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([customerId])
+  @@index([status])
+  @@map("payments")
+}
+
+// ==================== Event Sourcing ====================
+
+/// Domain event log for event sourcing
+model DomainEventLog {
+  id          String   @id @default(cuid())
+  eventId     String   @unique
+  eventType   String
+  aggregateId String
+  aggregateType String
+  payload     String   // JSON string
+  metadata    String?  // JSON string
+  version     Int      @default(1)
+  occurredAt  DateTime
+  processedAt DateTime?
+  status      String   @default("pending") // pending, processed, failed
+
+  @@index([eventType])
+  @@index([aggregateId])
+  @@index([aggregateType])
+  @@index([status])
+  @@index([occurredAt])
+  @@map("domain_event_logs")
+}
+
+// ==================== Notifications ====================
+
+/// Notification entity
+model Notification {
+  id          String    @id @default(cuid())
+  type        String
+  priority    String    @default("normal") // low, normal, high
+  channel     String    @default("in_app") // in_app, email, sms, push
+  recipientId String
+  title       String
+  message     String
+  data        String?   // JSON string
+  readAt      DateTime?
+  sentAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([recipientId])
+  @@index([type])
+  @@index([createdAt])
+  @@map("notifications")
+}

@@ -1,0 +1,110 @@
+# =====================================================
+# Docker Compose - Full Stack
+# =====================================================
+# Production-ready multi-container setup
+# Includes: App, PostgreSQL, Redis
+
+services:
+  # ---------------------------------------------------
+  # Application Service
+  # ---------------------------------------------------
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: ddd-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/ddd_db
+      - REDIS_URL=redis://redis:6379
+      - NEXT_TELEMETRY_DISABLED=1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ddd-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ---------------------------------------------------
+  # PostgreSQL Database
+  # ---------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: ddd-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=ddd_db
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ddd-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ddd_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ---------------------------------------------------
+  # Redis Cache
+  # ---------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: ddd-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - ddd-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    command: redis-server --appendonly yes
+
+  # ---------------------------------------------------
+  # Redis Commander (Optional - Redis GUI)
+  # ---------------------------------------------------
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: ddd-redis-commander
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    networks:
+      - ddd-network
+    depends_on:
+      - redis
+    profiles:
+      - tools
+
+networks:
+  ddd-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

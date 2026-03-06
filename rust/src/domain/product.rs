@@ -90,3 +90,84 @@ pub trait ProductRepository: Send + Sync {
     fn find_active(&self, page: i64, page_size: i64) -> impl std::future::Future<Output = anyhow::Result<(Vec<Product>, i64)>> + Send;
     fn save(&self, product: &Product) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::money::Currency;
+
+    fn usd(amount: i64) -> Money {
+        Money::new(amount, Currency::Usd).unwrap()
+    }
+
+    #[test]
+    fn new_product_normalizes_fields_and_emits_event() {
+        let mut product = Product::new(
+            "  Keyboard  ",
+            "  Mechanical keyboard  ",
+            usd(15999),
+            "  kb-001 ",
+            10,
+        )
+        .unwrap();
+
+        assert_eq!(product.name(), "Keyboard");
+        assert_eq!(product.description(), "Mechanical keyboard");
+        assert_eq!(product.sku(), "KB-001");
+        assert_eq!(product.stock_quantity(), 10);
+        assert!(product.is_active());
+
+        let events = product.drain_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "product.created");
+    }
+
+    #[test]
+    fn new_product_rejects_bad_name() {
+        let result = Product::new("x", "desc", usd(100), "sku-1", 1);
+        assert_eq!(result.unwrap_err(), DomainError::InvalidProductName);
+    }
+
+    #[test]
+    fn new_product_rejects_negative_stock() {
+        let result = Product::new("Keyboard", "desc", usd(100), "sku-1", -1);
+        assert_eq!(result.unwrap_err(), DomainError::NegativeStock);
+    }
+
+    #[test]
+    fn adjust_stock_increases_and_decreases() {
+        let mut product = Product::new("Keyboard", "desc", usd(100), "sku-1", 5).unwrap();
+        product.drain_events();
+
+        product.adjust_stock(3).unwrap();
+        assert_eq!(product.stock_quantity(), 8);
+
+        product.adjust_stock(-2).unwrap();
+        assert_eq!(product.stock_quantity(), 6);
+
+        let events = product.drain_events();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event_type, "product.stock_adjusted");
+        assert_eq!(events[1].event_type, "product.stock_adjusted");
+    }
+
+    #[test]
+    fn adjust_stock_rejects_insufficient_stock() {
+        let mut product = Product::new("Keyboard", "desc", usd(100), "sku-1", 2).unwrap();
+        let result = product.adjust_stock(-5);
+        assert_eq!(
+            result.unwrap_err(),
+            DomainError::InsufficientStock {
+                available: 2,
+                requested: 5
+            }
+        );
+    }
+
+    #[test]
+    fn deactivate_marks_inactive() {
+        let mut product = Product::new("Keyboard", "desc", usd(100), "sku-1", 2).unwrap();
+        product.deactivate();
+        assert!(!product.is_active());
+    }
+}

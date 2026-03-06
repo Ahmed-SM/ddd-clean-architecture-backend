@@ -112,3 +112,70 @@ pub trait CustomerRepository: Send + Sync {
     fn find_by_email(&self, email: &str) -> impl std::future::Future<Output = anyhow::Result<Option<Customer>>> + Send;
     fn save(&self, customer: &Customer) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_customer_normalizes_fields_and_emits_event() {
+        let mut customer = Customer::new("  Jane Doe  ", "  JANE@EXAMPLE.COM  ").unwrap();
+
+        assert_eq!(customer.name(), "Jane Doe");
+        assert_eq!(customer.email(), "jane@example.com");
+        assert_eq!(customer.status(), Status::Active);
+
+        let events = customer.drain_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "customer.registered");
+    }
+
+    #[test]
+    fn new_customer_rejects_invalid_name() {
+        let result = Customer::new(" ", "jane@example.com");
+        assert_eq!(result.unwrap_err(), DomainError::InvalidName);
+    }
+
+    #[test]
+    fn new_customer_rejects_invalid_email() {
+        let result = Customer::new("Jane Doe", "invalid-email");
+        assert_eq!(
+            result.unwrap_err(),
+            DomainError::InvalidEmail("invalid-email".to_string())
+        );
+    }
+
+    #[test]
+    fn change_email_updates_value_and_tracks_event() {
+        let mut customer = Customer::new("Jane Doe", "jane@example.com").unwrap();
+        customer.drain_events();
+
+        customer.change_email("new@example.com").unwrap();
+
+        assert_eq!(customer.email(), "new@example.com");
+        assert_eq!(customer.version(), 1);
+        let events = customer.drain_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "customer.email_changed");
+    }
+
+    #[test]
+    fn change_email_noop_for_same_value() {
+        let mut customer = Customer::new("Jane Doe", "jane@example.com").unwrap();
+        customer.drain_events();
+
+        customer.change_email("jane@example.com").unwrap();
+
+        assert_eq!(customer.version(), 0);
+        assert!(customer.drain_events().is_empty());
+    }
+
+    #[test]
+    fn deactivated_customer_cannot_change_email() {
+        let mut customer = Customer::new("Jane Doe", "jane@example.com").unwrap();
+        customer.deactivate("requested by customer");
+
+        let result = customer.change_email("new@example.com");
+        assert_eq!(result.unwrap_err(), DomainError::CustomerNotActive);
+    }
+}
